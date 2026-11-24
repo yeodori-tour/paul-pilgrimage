@@ -1,0 +1,1389 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>사도 바울 성지순례 이동경로 애니메이션 지도 (그리스 · 터키)</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts: Inter & Noto Sans KR -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+
+  <style>
+    body {
+      font-family: 'Noto Sans KR', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    /* 커스텀 스크롤바 */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.04);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(100, 116, 139, 0.35);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(71, 85, 105, 0.55);
+    }
+
+    /* Leaflet 지도 컨테이너 높이 및 스타일 */
+    #map {
+      width: 100%;
+      height: 100%;
+      min-height: 420px;
+      z-index: 1;
+      background: #e2e8f0;
+    }
+
+    /* 커스텀 마커 스타일 */
+    .stop-marker-badge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #ffffff;
+      border: 2px solid #ffffff;
+      box-shadow: 0 3px 10px rgba(15, 23, 42, 0.28);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .stop-marker-badge.active {
+      transform: scale(1.25);
+      box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.25), 0 6px 14px rgba(15, 23, 42, 0.35);
+      z-index: 999;
+    }
+
+    .moving-vehicle-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 9999px;
+      background: #0f172a;
+      color: #ffffff;
+      border: 2.5px solid #fbbf24;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.45);
+      font-size: 18px;
+      line-height: 1;
+      pointer-events: none;
+    }
+
+    .moving-vehicle-icon.flight {
+      background: #1d4ed8;
+      border-color: #93c5fd;
+    }
+
+    .moving-vehicle-icon.bus {
+      background: #047857;
+      border-color: #6ee7b7;
+    }
+
+    /* 오프라인/타일 실패 백업 캔버스 */
+    #fallbackCanvas {
+      width: 100%;
+      height: 100%;
+      display: none;
+      background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 50%, #e0f2fe 100%);
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased selection:bg-blue-600 selection:text-white">
+
+  <!-- 상단 헤더 -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+    <div class="max-w-7xl mx-auto px-3 sm:px-6 py-3 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+      <div class="flex items-start sm:items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-emerald-600 text-white flex items-center justify-center shadow-md shrink-0 text-lg">
+          ✝️
+        </div>
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h1 class="text-base sm:text-xl font-bold tracking-tight text-slate-900">
+              사도 바울 성지순례 이동경로 애니메이션 지도
+            </h1>
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+              인천 ↔ 도하 · 그리스 · 터키
+            </span>
+          </div>
+          <p class="text-xs sm:text-sm text-slate-500 mt-0.5">
+            국제선 항공 · 육상 버스 · 국내선 항공 이동 경로를 실시간 애니메이션으로 살펴보세요.
+          </p>
+        </div>
+      </div>
+
+      <!-- 보기 모드 전환 버튼 (전체 여정 / 그리스·터키 집중) -->
+      <div class="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 self-start lg:self-auto">
+        <button
+          id="modeFullBtn"
+          type="button"
+          class="px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all bg-blue-600 text-white shadow-sm cursor-pointer"
+        >
+          전체 여정 (인천~도하~그리스/터키~인천)
+        </button>
+        <button
+          id="modeRegionalBtn"
+          type="button"
+          class="px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all text-slate-600 hover:text-slate-900 hover:bg-white/70 cursor-pointer"
+        >
+          그리스·터키 집중 (아테네~이스탄불)
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 메인 레이아웃 -->
+  <main class="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
+
+      <!-- 좌/중앙 영역: 지도 + 재생 컨트롤 + 현재 구간/지점 정보 카드 (8 cols) -->
+      <div class="lg:col-span-8 flex flex-col gap-4">
+
+        <!-- 지도 카드 -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <!-- 지도 상단 상태 바 -->
+          <div class="px-4 py-2.5 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm">
+            <div class="flex items-center gap-2">
+              <span id="currentTransportBadge" class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-semibold bg-blue-500/20 text-blue-200 border border-blue-400/30">
+                ✈️ 국제선 비행기
+              </span>
+              <span id="currentLegSummary" class="font-medium text-slate-100 truncate max-w-[240px] sm:max-w-md">
+                인천국제공항 → 하마드 국제공항 (도하)
+              </span>
+            </div>
+            <div class="flex items-center gap-3 text-slate-300 text-xs">
+              <span>구간 <strong id="legCounterText" class="text-white">1 / 19</strong></span>
+              <span>진행률 <strong id="overallProgressText" class="text-amber-300">0%</strong></span>
+            </div>
+          </div>
+
+          <!-- 지도 영역 -->
+          <div class="relative w-full h-[380px] sm:h-[460px] md:h-[500px]">
+            <div id="map"></div>
+            <canvas id="fallbackCanvas"></canvas>
+
+            <!-- 범례 오버레이 -->
+            <div class="hidden sm:flex flex-col gap-1.5 absolute bottom-3 left-3 z-[400] bg-white/95 backdrop-blur-sm px-3 py-2.5 rounded-xl border border-slate-200 shadow-md text-xs text-slate-700">
+              <div class="font-bold text-slate-800 mb-0.5">이동 수단 범례</div>
+              <div class="flex items-center gap-2">
+                <span class="w-5 h-0.5 bg-blue-600 inline-block rounded"></span>
+                <span>국제선 / 국내선 항공</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="w-5 h-1 bg-emerald-600 inline-block rounded"></span>
+                <span>육상 버스 / 해협 이동</span>
+              </div>
+            </div>
+
+            <!-- 타일 안내 배지 -->
+            <div id="tileStatusNotice" class="hidden absolute top-3 right-3 z-[400] bg-amber-50/95 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-lg text-xs shadow">
+              오프라인/네트워크 제한 환경으로 내장 벡터 지도로 표시 중입니다.
+            </div>
+          </div>
+
+          <!-- 전체 진행 스크러버 & 재생 컨트롤 -->
+          <div class="p-3.5 sm:p-4 bg-slate-50 border-t border-slate-200 space-y-3">
+            <!-- 스크러버 바 -->
+            <div>
+              <input
+                id="timelineScrubber"
+                type="range"
+                min="0"
+                max="1000"
+                value="0"
+                aria-label="전체 여정 진행률 조절"
+                class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+              <div class="flex justify-between text-[11px] text-slate-500 mt-1">
+                <span>출발: 인천국제공항</span>
+                <span id="scrubberCurrentLabel" class="font-semibold text-blue-700">1. 인천국제공항</span>
+                <span>도착: 인천국제공항</span>
+              </div>
+            </div>
+
+            <!-- 버튼 그룹 -->
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-1.5 sm:gap-2">
+                <button
+                  id="prevStopBtn"
+                  type="button"
+                  title="이전 경유지"
+                  class="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 active:scale-[0.98] text-slate-700 border border-slate-300 text-xs sm:text-sm font-semibold transition cursor-pointer shadow-2xs"
+                >
+                  ⏮ 이전
+                </button>
+
+                <button
+                  id="playPauseBtn"
+                  type="button"
+                  class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs sm:text-sm font-bold transition cursor-pointer shadow-sm flex items-center gap-1.5"
+                >
+                  <span id="playPauseIcon">▶</span>
+                  <span id="playPauseText">재생</span>
+                </button>
+
+                <button
+                  id="nextStopBtn"
+                  type="button"
+                  title="다음 경유지"
+                  class="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 active:scale-[0.98] text-slate-700 border border-slate-300 text-xs sm:text-sm font-semibold transition cursor-pointer shadow-2xs"
+                >
+                  다음 ⏭
+                </button>
+
+                <button
+                  id="restartBtn"
+                  type="button"
+                  title="처음부터 다시 보기"
+                  class="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 active:scale-[0.98] text-slate-600 border border-slate-300 text-xs sm:text-sm font-semibold transition cursor-pointer"
+                >
+                  ↺ 초기화
+                </button>
+              </div>
+
+              <!-- 배속 선택 -->
+              <div class="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-300">
+                <span class="text-xs text-slate-500 px-1.5 font-medium">배속</span>
+                <button type="button" data-speed="1" class="speed-btn px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-900 text-white cursor-pointer">1x</button>
+                <button type="button" data-speed="2" class="speed-btn px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer">2x</button>
+                <button type="button" data-speed="4" class="speed-btn px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer">4x</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 현재 경유지 / 이동 구간 상세 정보 카드 -->
+        <div id="stopInfoCard" class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
+          <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div class="space-y-1.5">
+              <div class="flex flex-wrap items-center gap-2">
+                <span id="infoStopNumber" class="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-600 text-white">
+                  경유지 #1 / 20
+                </span>
+                <span id="infoRegionBadge" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                  대한민국 · 아시아
+                </span>
+                <span id="infoTransportBadge" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                  ✈️ 다음 구간: 국제선 비행기
+                </span>
+              </div>
+
+              <div class="flex flex-wrap items-baseline gap-2 pt-1">
+                <h2 id="infoStopTitleKo" class="text-xl sm:text-2xl font-bold text-slate-900">
+                  인천국제공항
+                </h2>
+                <span id="infoStopTitleEn" class="text-sm font-medium text-slate-400">
+                  Incheon International Airport (ICN)
+                </span>
+              </div>
+            </div>
+
+            <button
+              id="focusStopBtn"
+              type="button"
+              class="self-start px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-semibold transition cursor-pointer shrink-0"
+            >
+              📍 이 위치로 이동
+            </button>
+          </div>
+
+          <p id="infoStopDescription" class="mt-3 text-sm leading-relaxed text-slate-700 bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+            사도 바울의 발자취를 따라 그리스와 터키(소아시아)로 향하는 성지순례 여정이 시작되는 출발지입니다.
+          </p>
+
+          <div id="infoNextLegBox" class="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs sm:text-sm text-slate-600 pt-2 border-t border-slate-100">
+            <div>
+              <span class="font-semibold text-slate-800">다음 이동:</span>
+              <span id="infoNextLegText">하마드 국제공항 (도하 경유) — 국제선 비행기</span>
+            </div>
+            <span id="infoCoordsText" class="font-mono text-xs text-slate-400">
+              37.4602° N, 126.4407° E
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 우측 영역: 전체 20개 경유지 타임라인 리스트 (4 cols) -->
+      <aside class="lg:col-span-4 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col max-h-[760px] lg:max-h-[820px]">
+        <div class="px-4 py-3.5 border-b border-slate-200 bg-slate-50/80">
+          <div class="flex items-center justify-between">
+            <h3 class="font-bold text-slate-900 text-sm sm:text-base">
+              전체 순례 일정 타임라인
+            </h3>
+            <span class="text-xs font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+              총 20개 지점 · 19개 구간
+            </span>
+          </div>
+          <p class="text-xs text-slate-500 mt-1">
+            원하는 지점을 클릭하면 해당 위치로 바로 이동하고 설명을 볼 수 있습니다.
+          </p>
+        </div>
+
+        <div id="timelineList" class="overflow-y-auto divide-y divide-slate-100 flex-1">
+          <!-- JavaScript로 동적 렌더링 -->
+        </div>
+      </aside>
+
+    </div>
+  </main>
+
+  <!-- 안내/메시지 토스트 (alert 대체용) -->
+  <div id="toastBanner" class="fixed bottom-5 right-5 z-50 hidden max-w-sm bg-slate-900 text-white px-4 py-3 rounded-xl shadow-lg text-xs sm:text-sm font-medium border border-slate-700"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <script>
+    /**
+     * =========================================================================
+     * 1. 사도 바울 성지순례 전체 일정 데이터 (총 20개 경유지 / 19개 이동 구간)
+     * =========================================================================
+     * transportToNext:
+     *  - 'intl-flight' : 국제선 비행기
+     *  - 'bus'         : 버스 이동 (해협 도선/연계 포함)
+     *  - 'dom-flight'  : 국내선 항공
+     *  - null          : 최종 도착지
+     */
+    const PILGRIMAGE_STOPS = [
+      {
+        id: 1,
+        nameKo: '인천국제공항',
+        nameEn: 'Incheon International Airport, KR',
+        region: '대한민국 · 동아시아',
+        lat: 37.4602,
+        lng: 126.4407,
+        transportToNext: 'intl-flight',
+        transportLabel: '국제선 비행기',
+        nextNameKo: '하마드 국제공항 (도하)',
+        description: '사도 바울의 선교 발자취를 따라 그리스와 터키(소아시아)로 향하는 성지순례 여정이 시작되는 출발 공항입니다.'
+      },
+      {
+        id: 2,
+        nameKo: '하마드 국제공항 (도하)',
+        nameEn: 'Hamad International Airport, Doha, QA',
+        region: '카타르 · 중동',
+        lat: 25.2736,
+        lng: 51.6081,
+        transportToNext: 'intl-flight',
+        transportLabel: '국제선 비행기',
+        nextNameKo: '아테네',
+        description: '페르시아만 연안의 중동 허브 카타르 도하에서 환승하여 지중해 그리스 아테네로 향합니다.'
+      },
+      {
+        id: 3,
+        nameKo: '아테네',
+        nameEn: 'Athens, Greece',
+        region: '그리스 · 아티카',
+        lat: 37.9838,
+        lng: 23.7275,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '고린도',
+        description: '사도 바울이 아레오바고(마르스 언덕)에서 ‘알지 못하는 신에게’ 새겨진 제단을 언급하며 복음을 전한 고대 철학과 문명의 도시입니다(행 17장).'
+      },
+      {
+        id: 4,
+        nameKo: '고린도',
+        nameEn: 'Corinth, Greece',
+        region: '그리스 · 펠로폰네소스',
+        lat: 37.9386,
+        lng: 22.9322,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '메테오라',
+        description: '바울이 약 1년 6개월간 머물며 천막을 짓고 복음을 전하며 고린도전·후서를 기록한 항구 상업 도시입니다(행 18장).'
+      },
+      {
+        id: 5,
+        nameKo: '메테오라',
+        nameEn: 'Meteora, Greece',
+        region: '그리스 · 테살리아',
+        lat: 39.7217,
+        lng: 21.6306,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '데살로니카',
+        description: '기암괴석 절벽 위에 세워진 수도원군으로, 바울의 북부 그리스 선교 길목에서 중세 기독교 영성의 깊이를 느낄 수 있는 곳입니다.'
+      },
+      {
+        id: 6,
+        nameKo: '데살로니카',
+        nameEn: 'Thessaloniki, Greece',
+        region: '그리스 · 마케도니아',
+        lat: 40.6401,
+        lng: 22.9444,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '빌립보',
+        description: '바울이 세 안식일 동안 회당에서 그리스도의 고난과 부활을 변론하고, 이후 데살로니가전·후서를 보낸 마케도니아의 중심 도시입니다(행 17장).'
+      },
+      {
+        id: 7,
+        nameKo: '빌립보',
+        nameEn: 'Philippi, Greece',
+        region: '그리스 · 동마케도니아',
+        lat: 41.0131,
+        lng: 24.2856,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '까발라',
+        description: '바울이 ‘마케도니아로 건너와 우리를 도우라’는 환상을 본 뒤 유럽 최초의 개종자 루디아를 만나고 빌립보서를 남긴 의미 깊은 도시입니다(행 16장).'
+      },
+      {
+        id: 8,
+        nameKo: '까발라',
+        nameEn: 'Kavala (Neapolis), Greece',
+        region: '그리스 · 북에게해 연안',
+        lat: 40.9376,
+        lng: 24.4129,
+        transportToNext: 'bus',
+        transportLabel: '버스/해협 이동',
+        nextNameKo: '드로아',
+        description: '성경의 ‘네압볼리’로, 바울이 아시아에서 유럽으로 처음 상륙하고 다시 아시아로 건너갈 때 거친 에게해 연안 항구 도시입니다.'
+      },
+      {
+        id: 9,
+        nameKo: '드로아',
+        nameEn: 'Alexandria Troas, Turkey',
+        region: '터키 · 차나칼레(트로아스)',
+        lat: 39.7667,
+        lng: 26.1500,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '아이발릭',
+        description: '바울이 마케도니아 환상을 본 곳이자, 3차 전도여행 때 유두고가 창문에서 떨어졌다가 살아난 일화가 전해지는 항구 도시입니다(행 16장, 20장).'
+      },
+      {
+        id: 10,
+        nameKo: '아이발릭',
+        nameEn: 'Ayvalik, Turkey',
+        region: '터키 · 발르케시르(에게해)',
+        lat: 39.3192,
+        lng: 26.6969,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '소아시아 7교회 권역',
+        description: '올리브 숲과 에게해 섬들이 어우러진 해안 도시로, 드로아에서 소아시아 7교회 권역으로 이어지는 남하 여정의 거점입니다.'
+      },
+      {
+        id: 11,
+        nameKo: '소아시아 7교회 권역',
+        nameEn: 'Seven Churches of Asia Corridor, TR',
+        region: '터키 · 서부 소아시아',
+        lat: 38.6800,
+        lng: 27.4200,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '마니사',
+        description: '요한계시록 2~3장에 기록된 소아시아 일곱 교회(에베소·서머나·버가모·두아디라·사데·빌라델비아·라오디게아)의 역사적 권역을 아우르는 순례 구간입니다.'
+      },
+      {
+        id: 12,
+        nameKo: '마니사',
+        nameEn: 'Manisa (Magnesia), Turkey',
+        region: '터키 · 에게해 내륙',
+        lat: 38.6191,
+        lng: 27.4289,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '에베소',
+        description: '고대 마그네시아로 불리던 지역으로, 소아시아 내륙 교회들과 에베소를 연결하는 요충지입니다.'
+      },
+      {
+        id: 13,
+        nameKo: '에베소',
+        nameEn: 'Ephesus, Turkey',
+        region: '터키 · 셀축(서부 소아시아)',
+        lat: 37.9390,
+        lng: 27.3417,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '파묵칼레',
+        description: '바울이 약 3년간 두란노 서원에서 말씀을 가르치며 에베소서를 기록하고, 사도 요한과도 깊은 인연을 맺은 소아시아 선교의 중심지입니다(행 19장).'
+      },
+      {
+        id: 14,
+        nameKo: '파묵칼레',
+        nameEn: 'Pamukkale (Hierapolis), Turkey',
+        region: '터키 · 데니즐리',
+        lat: 37.9204,
+        lng: 29.1204,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '골로새',
+        description: '순백의 석회붕과 고대 히에라볼리스 유적이 자리한 곳으로, 골로새서 4장에 언급된 에바브라의 사역지와 인접한 도시입니다.'
+      },
+      {
+        id: 15,
+        nameKo: '골로새',
+        nameEn: 'Colossae, Turkey',
+        region: '터키 · 리쿠스 계곡',
+        lat: 37.7833,
+        lng: 29.2500,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '비시디아 안디옥',
+        description: '리쿠스 계곡에 위치한 고대 도시로, 바울이 그리스도의 충만함과 교회의 머리가 되심을 선포하며 골로새서와 빌레몬서를 보낸 곳입니다.'
+      },
+      {
+        id: 16,
+        nameKo: '비시디아 안디옥',
+        nameEn: 'Pisidian Antioch, Turkey',
+        region: '터키 · 이스파르타(얄바츠)',
+        lat: 38.3036,
+        lng: 31.1869,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '콘야',
+        description: '바울이 1차 전도여행 때 회당에서 구속사의 말씀을 길게 전하며 이방인 선교의 전환점을 맞은 갈라디아 지역 핵심 도시입니다(행 13장).'
+      },
+      {
+        id: 17,
+        nameKo: '콘야',
+        nameEn: 'Konya (Iconium), Turkey',
+        region: '터키 · 중앙 아나톨리아',
+        lat: 37.8746,
+        lng: 32.4932,
+        transportToNext: 'bus',
+        transportLabel: '버스 이동',
+        nextNameKo: '카파도키아',
+        description: '성경의 ‘이고니온’으로, 바울과 바나바가 담대히 주를 힘입어 복음을 전파하며 수많은 유대와 헬라인을 믿게 한 도시입니다(행 14장).'
+      },
+      {
+        id: 18,
+        nameKo: '카파도키아',
+        nameEn: 'Cappadocia, Turkey',
+        region: '터키 · 네브셰히르(중앙 아나톨리아)',
+        lat: 38.6431,
+        lng: 34.8289,
+        transportToNext: 'dom-flight',
+        transportLabel: '국내선 항공',
+        nextNameKo: '이스탄불',
+        description: '기암괴석과 지하도시(데린쿠유 등)가 발달한 곳으로, 초기 기독교인들이 박해를 피해 신앙 공동체를 이루며 숨어 예배하던 성지입니다.'
+      },
+      {
+        id: 19,
+        nameKo: '이스탄불',
+        nameEn: 'Istanbul (Constantinople), Turkey',
+        region: '터키 · 마르마라(유럽·아시아 경계)',
+        lat: 41.0082,
+        lng: 28.9784,
+        transportToNext: 'intl-flight',
+        transportLabel: '국제선 비행기',
+        nextNameKo: '하마드 국제공항 (도하)',
+        description: '보스포루스 해협을 사이에 두고 동서양이 만나는 역사적 도시로, 순례 일정을 마무리하고 귀국 항공편에 오르는 거점입니다.'
+      },
+      {
+        id: 20,
+        nameKo: '인천국제공항',
+        nameEn: 'Incheon International Airport, KR',
+        region: '대한민국 · 귀국 도착',
+        lat: 37.4602,
+        lng: 126.4407,
+        transportToNext: null,
+        transportLabel: '여정 완료',
+        nextNameKo: null,
+        description: '도하 경유 항공편을 통해 인천국제공항에 안전하게 도착하며 사도 바울 성지순례 전체 여정을 마칩니다.'
+      }
+    ];
+
+    /**
+     * =========================================================================
+     * 2. 애플리케이션 상태 관리
+     * =========================================================================
+     */
+    const state = {
+      isPlaying: false,
+      speed: 1, // 1, 2, 4
+      viewMode: 'full', // 'full' | 'regional'
+      // progress: 0 ~ (PILGRIMAGE_STOPS.length - 1) 실수값
+      // 예: 0.0 = 1번 지점 출발, 1.0 = 2번 지점 도착, 2.5 = 3->4 구간 50% 진행
+      progress: 0,
+      selectedStopIndex: 0,
+      lastFrameTime: null,
+      mapReady: false,
+      usingFallbackCanvas: false
+    };
+
+    // DOM 참조
+    const els = {
+      mapContainer: document.getElementById('map'),
+      fallbackCanvas: document.getElementById('fallbackCanvas'),
+      tileStatusNotice: document.getElementById('tileStatusNotice'),
+      modeFullBtn: document.getElementById('modeFullBtn'),
+      modeRegionalBtn: document.getElementById('modeRegionalBtn'),
+      playPauseBtn: document.getElementById('playPauseBtn'),
+      playPauseIcon: document.getElementById('playPauseIcon'),
+      playPauseText: document.getElementById('playPauseText'),
+      prevStopBtn: document.getElementById('prevStopBtn'),
+      nextStopBtn: document.getElementById('nextStopBtn'),
+      restartBtn: document.getElementById('restartBtn'),
+      scrubber: document.getElementById('timelineScrubber'),
+      scrubberCurrentLabel: document.getElementById('scrubberCurrentLabel'),
+      currentTransportBadge: document.getElementById('currentTransportBadge'),
+      currentLegSummary: document.getElementById('currentLegSummary'),
+      legCounterText: document.getElementById('legCounterText'),
+      overallProgressText: document.getElementById('overallProgressText'),
+      infoStopNumber: document.getElementById('infoStopNumber'),
+      infoRegionBadge: document.getElementById('infoRegionBadge'),
+      infoTransportBadge: document.getElementById('infoTransportBadge'),
+      infoStopTitleKo: document.getElementById('infoStopTitleKo'),
+      infoStopTitleEn: document.getElementById('infoStopTitleEn'),
+      infoStopDescription: document.getElementById('infoStopDescription'),
+      infoNextLegBox: document.getElementById('infoNextLegBox'),
+      infoNextLegText: document.getElementById('infoNextLegText'),
+      infoCoordsText: document.getElementById('infoCoordsText'),
+      focusStopBtn: document.getElementById('focusStopBtn'),
+      timelineList: document.getElementById('timelineList'),
+      toastBanner: document.getElementById('toastBanner'),
+      speedBtns: document.querySelectorAll('.speed-btn')
+    };
+
+    // Leaflet 객체 참조
+    let leafletMap = null;
+    let basePolylineGroup = null;
+    let activePolylineGroup = null;
+    let stopMarkers = [];
+    let movingVehicleMarker = null;
+    let segmentCurves = []; // 각 구간(0..18)별 보간 좌표 배열 [ [lat, lng], ... ]
+
+    function showToast(message) {
+      els.toastBanner.textContent = message;
+      els.toastBanner.classList.remove('hidden');
+      clearTimeout(showToast._timer);
+      showToast._timer = setTimeout(() => {
+        els.toastBanner.classList.add('hidden');
+      }, 2800);
+    }
+
+    /**
+     * =========================================================================
+     * 3. 경로 보간 유틸리티 (항공 호 곡선 / 육상 부드러운 곡선)
+     * =========================================================================
+     */
+    function buildSegmentCurve(stopA, stopB, transportType) {
+      const lat1 = stopA.lat, lng1 = stopA.lng;
+      const lat2 = stopB.lat, lng2 = stopB.lng;
+
+      // 시작과 끝이 동일한 경우(예: 1번 출발 <-> 20번 도착)
+      const dist = Math.hypot(lat2 - lat1, lng2 - lng1);
+      if (dist < 0.0001) {
+        return [[lat1, lng1], [lat2, lng2]];
+      }
+
+      const isFlight = transportType === 'intl-flight' || transportType === 'dom-flight';
+      const steps = isFlight ? 64 : 36;
+
+      // 수직 법선 벡터 계산
+      const dLat = lat2 - lat1;
+      const dLng = lng2 - lng1;
+      const len = Math.hypot(dLat, dLng) || 1;
+      const normLat = -dLng / len;
+      const normLng = dLat / len;
+
+      // 항공기는 장거리 대권 느낌의 곡률, 버스는 도로/지형 우회 느낌의 완만한 곡률
+      const bendFactor = isFlight
+        ? Math.min(len * 0.16, 7.5)
+        : Math.min(len * 0.11, 0.55);
+
+      const points = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        // 포물선 오프셋: 양 끝점 0, 중간 t=0.5에서 최대
+        const arch = 4 * t * (1 - t) * bendFactor;
+        const lat = lat1 + dLat * t + normLat * arch;
+        const lng = lng1 + dLng * t + normLng * arch;
+        points.push([lat, lng]);
+      }
+      return points;
+    }
+
+    // 모든 19개 구간 곡선 미리 생성
+    function precomputeAllCurves() {
+      segmentCurves = [];
+      for (let i = 0; i < PILGRIMAGE_STOPS.length - 1; i++) {
+        const a = PILGRIMAGE_STOPS[i];
+        const b = PILGRIMAGE_STOPS[i + 1];
+        segmentCurves.push(buildSegmentCurve(a, b, a.transportToNext));
+      }
+    }
+
+    // progress(실수)에 해당하는 현재 좌표 및 이동 각도 계산
+    function getPositionAtProgress(prog) {
+      const maxSeg = PILGRIMAGE_STOPS.length - 2;
+      const clamped = Math.max(0, Math.min(prog, PILGRIMAGE_STOPS.length - 1));
+      const segIndex = Math.min(Math.floor(clamped), maxSeg);
+      const localT = clamped - segIndex;
+
+      const curve = segmentCurves[segIndex] || [[PILGRIMAGE_STOPS[0].lat, PILGRIMAGE_STOPS[0].lng]];
+      const exactIdx = localT * (curve.length - 1);
+      const idx0 = Math.floor(exactIdx);
+      const idx1 = Math.min(idx0 + 1, curve.length - 1);
+      const frac = exactIdx - idx0;
+
+      const lat = curve[idx0][0] + (curve[idx1][0] - curve[idx0][0]) * frac;
+      const lng = curve[idx0][1] + (curve[idx1][1] - curve[idx0][1]) * frac;
+
+      const nextPt = curve[Math.min(idx1 + 1, curve.length - 1)];
+      const angleDeg = (Math.atan2(nextPt[1] - lng, nextPt[0] - lat) * 180) / Math.PI;
+
+      return {
+        lat,
+        lng,
+        segIndex,
+        localT,
+        angleDeg,
+        transport: PILGRIMAGE_STOPS[segIndex]?.transportToNext || 'bus'
+      };
+    }
+
+    /**
+     * =========================================================================
+     * 4. 타임라인 리스트 렌더링 & 동기화
+     * =========================================================================
+     */
+    function renderTimelineList() {
+      els.timelineList.innerHTML = '';
+
+      PILGRIMAGE_STOPS.forEach((stop, idx) => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.dataset.index = idx;
+        item.className = `timeline-item w-full text-left px-4 py-3 flex items-start gap-3 transition hover:bg-blue-50/70 cursor-pointer`;
+
+        let badgeColor = 'bg-slate-600 text-white';
+        if (idx === 0) badgeColor = 'bg-blue-600 text-white';
+        else if (idx === PILGRIMAGE_STOPS.length - 1) badgeColor = 'bg-indigo-700 text-white';
+        else if (stop.transportToNext === 'intl-flight' || stop.transportToNext === 'dom-flight') {
+          badgeColor = 'bg-sky-600 text-white';
+        } else {
+          badgeColor = 'bg-emerald-600 text-white';
+        }
+
+        let legChip = '';
+        if (stop.transportToNext === 'intl-flight') {
+          legChip = `<span class="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 mt-1.5">✈️ 다음: 국제선 비행기</span>`;
+        } else if (stop.transportToNext === 'dom-flight') {
+          legChip = `<span class="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 mt-1.5">🛫 다음: 국내선 항공</span>`;
+        } else if (stop.transportToNext === 'bus') {
+          legChip = `<span class="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 mt-1.5">🚌 다음: ${stop.transportLabel}</span>`;
+        } else {
+          legChip = `<span class="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 mt-1.5">🏁 순례 여정 도착</span>`;
+        }
+
+        item.innerHTML = `
+          <span class="w-6 h-6 rounded-full ${badgeColor} text-xs font-bold flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
+            ${stop.id}
+          </span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-bold text-sm text-slate-900 truncate">${stop.nameKo}</span>
+              <span class="text-[11px] text-slate-400 shrink-0">${stop.region.split('·')[0].trim()}</span>
+            </div>
+            <div class="text-xs text-slate-500 truncate">${stop.nameEn}</div>
+            ${legChip}
+          </div>
+        `;
+
+        item.addEventListener('click', () => {
+          selectStop(idx, true);
+        });
+
+        els.timelineList.appendChild(item);
+      });
+    }
+
+    function highlightTimelineItem(index) {
+      const items = els.timelineList.querySelectorAll('.timeline-item');
+      items.forEach((el, i) => {
+        if (i === index) {
+          el.classList.add('bg-blue-50', 'ring-1', 'ring-inset', 'ring-blue-200');
+          el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+          el.classList.remove('bg-blue-50', 'ring-1', 'ring-inset', 'ring-blue-200');
+        }
+      });
+    }
+
+    /**
+     * =========================================================================
+     * 5. 정보 카드 & 상단 상태 업데이트
+     * =========================================================================
+     */
+    function updateInfoCard(stopIndex) {
+      const stop = PILGRIMAGE_STOPS[stopIndex];
+      const total = PILGRIMAGE_STOPS.length;
+
+      els.infoStopNumber.textContent = `경유지 #${stop.id} / ${total}`;
+      els.infoRegionBadge.textContent = stop.region;
+      els.infoStopTitleKo.textContent = stop.nameKo;
+      els.infoStopTitleEn.textContent = stop.nameEn;
+      els.infoStopDescription.textContent = stop.description;
+      els.infoCoordsText.textContent = `${stop.lat.toFixed(4)}° N, ${stop.lng.toFixed(4)}° E`;
+
+      if (stop.transportToNext === 'intl-flight') {
+        els.infoTransportBadge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200';
+        els.infoTransportBadge.textContent = '✈️ 다음 구간: 국제선 비행기';
+        els.infoNextLegBox.classList.remove('hidden');
+        els.infoNextLegText.textContent = `${stop.nextNameKo} — 국제선 비행기`;
+      } else if (stop.transportToNext === 'dom-flight') {
+        els.infoTransportBadge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200';
+        els.infoTransportBadge.textContent = '🛫 다음 구간: 국내선 항공';
+        els.infoNextLegBox.classList.remove('hidden');
+        els.infoNextLegText.textContent = `${stop.nextNameKo} — 국내선 항공`;
+      } else if (stop.transportToNext === 'bus') {
+        els.infoTransportBadge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200';
+        els.infoTransportBadge.textContent = `🚌 다음 구간: ${stop.transportLabel}`;
+        els.infoNextLegBox.classList.remove('hidden');
+        els.infoNextLegText.textContent = `${stop.nextNameKo} — ${stop.transportLabel}`;
+      } else {
+        els.infoTransportBadge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200';
+        els.infoTransportBadge.textContent = '🏁 최종 도착지';
+        els.infoNextLegBox.classList.add('hidden');
+      }
+    }
+
+    function updateStatusHeaderAndScrubber() {
+      const maxStops = PILGRIMAGE_STOPS.length - 1;
+      const pct = Math.round((state.progress / maxStops) * 100);
+      els.overallProgressText.textContent = `${pct}%`;
+      els.scrubber.value = Math.round((state.progress / maxStops) * 1000);
+
+      const nearestStopIdx = Math.min(Math.round(state.progress), maxStops);
+      const nearestStop = PILGRIMAGE_STOPS[nearestStopIdx];
+      els.scrubberCurrentLabel.textContent = `${nearestStop.id}. ${nearestStop.nameKo}`;
+
+      const segIdx = Math.min(Math.floor(state.progress), maxStops - 1);
+      const fromStop = PILGRIMAGE_STOPS[segIdx];
+      const toStop = PILGRIMAGE_STOPS[segIdx + 1];
+
+      els.legCounterText.textContent = `${segIdx + 1} / ${maxStops}`;
+      els.currentLegSummary.textContent = `${fromStop.nameKo} → ${toStop.nameKo}`;
+
+      if (fromStop.transportToNext === 'intl-flight') {
+        els.currentTransportBadge.className = 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-semibold bg-blue-500/20 text-blue-200 border border-blue-400/30';
+        els.currentTransportBadge.textContent = '✈️ 국제선 비행기';
+      } else if (fromStop.transportToNext === 'dom-flight') {
+        els.currentTransportBadge.className = 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-semibold bg-indigo-500/25 text-indigo-200 border border-indigo-400/30';
+        els.currentTransportBadge.textContent = '🛫 국내선 항공';
+      } else {
+        els.currentTransportBadge.className = 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-semibold bg-emerald-500/20 text-emerald-200 border border-emerald-400/30';
+        els.currentTransportBadge.textContent = `🚌 ${fromStop.transportLabel}`;
+      }
+    }
+
+    /**
+     * =========================================================================
+     * 6. Leaflet 지도 초기화 및 경로/마커 렌더링
+     * =========================================================================
+     */
+    function initMap() {
+      try {
+        if (typeof L === 'undefined') {
+          enableFallbackCanvas();
+          return;
+        }
+
+        leafletMap = L.map('map', {
+          center: [34.5, 52.0],
+          zoom: 3,
+          minZoom: 2,
+          maxZoom: 14,
+          worldCopyJump: false
+        });
+
+        // CartoDB Positron 타일 (깔끔한 현대적 지도 스타일)
+        const cartoLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+          subdomains: 'abcd',
+          maxZoom: 19
+        });
+
+        let tileErrorCount = 0;
+        cartoLayer.on('tileerror', () => {
+          tileErrorCount += 1;
+          if (tileErrorCount > 12 && !state.usingFallbackCanvas) {
+            els.tileStatusNotice.classList.remove('hidden');
+          }
+        });
+
+        cartoLayer.addTo(leafletMap);
+
+        basePolylineGroup = L.layerGroup().addTo(leafletMap);
+        activePolylineGroup = L.layerGroup().addTo(leafletMap);
+
+        // 전체 경로(희미한 기준선) 그리기
+        for (let i = 0; i < segmentCurves.length; i++) {
+          const transport = PILGRIMAGE_STOPS[i].transportToNext;
+          const isFlight = transport === 'intl-flight' || transport === 'dom-flight';
+          L.polyline(segmentCurves[i], {
+            color: isFlight ? '#3b82f6' : '#10b981',
+            weight: isFlight ? 2.5 : 3.5,
+            opacity: 0.28,
+            dashArray: isFlight ? '6, 6' : null
+          }).addTo(basePolylineGroup);
+        }
+
+        // 경유지 마커 생성
+        stopMarkers = PILGRIMAGE_STOPS.map((stop, idx) => {
+          let bgClass = 'bg-slate-700';
+          if (idx === 0) bgClass = 'bg-blue-600';
+          else if (idx === PILGRIMAGE_STOPS.length - 1) bgClass = 'bg-indigo-700';
+          else if (stop.transportToNext === 'intl-flight' || stop.transportToNext === 'dom-flight') {
+            bgClass = 'bg-sky-600';
+          } else {
+            bgClass = 'bg-emerald-600';
+          }
+
+          const icon = L.divIcon({
+            className: 'custom-stop-div-icon',
+            html: `<div id="badge-${idx}" class="stop-marker-badge ${bgClass}">${stop.id}</div>`,
+            iconSize: [26, 26],
+            iconAnchor: [13, 13]
+          });
+
+          const marker = L.marker([stop.lat, stop.lng], { icon }).addTo(leafletMap);
+          marker.bindTooltip(`${stop.id}. ${stop.nameKo}`, {
+            direction: 'top',
+            offset: [0, -10]
+          });
+
+          marker.on('click', () => {
+            selectStop(idx, true);
+          });
+
+          return marker;
+        });
+
+        // 이동 차량/비행기 마커 생성
+        const startPos = getPositionAtProgress(state.progress);
+        const vehicleIcon = L.divIcon({
+          className: 'custom-vehicle-div-icon',
+          html: `<div id="vehicleMarkerEl" class="moving-vehicle-icon flight">✈️</div>`,
+          iconSize: [38, 38],
+          iconAnchor: [19, 19]
+        });
+
+        movingVehicleMarker = L.marker([startPos.lat, startPos.lng], {
+          icon: vehicleIcon,
+          zIndexOffset: 1000
+        }).addTo(leafletMap);
+
+        state.mapReady = true;
+        applyViewModeBounds(false);
+        renderMapProgress();
+      } catch (err) {
+        console.warn('Leaflet 초기화 실패, 백업 캔버스로 전환합니다:', err);
+        enableFallbackCanvas();
+      }
+    }
+
+    function enableFallbackCanvas() {
+      state.usingFallbackCanvas = true;
+      els.mapContainer.style.display = 'none';
+      els.fallbackCanvas.style.display = 'block';
+      els.tileStatusNotice.classList.remove('hidden');
+      resizeFallbackCanvas();
+      renderFallbackCanvas();
+    }
+
+    function resizeFallbackCanvas() {
+      const parent = els.fallbackCanvas.parentElement;
+      if (!parent) return;
+      els.fallbackCanvas.width = parent.clientWidth;
+      els.fallbackCanvas.height = parent.clientHeight;
+    }
+
+    // 오프라인/백업용 간이 투영 좌표 변환
+    function projectToCanvas(lat, lng, width, height) {
+      let minLat = 18, maxLat = 46, minLng = 18, maxLng = 132;
+      if (state.viewMode === 'regional') {
+        minLat = 35.5;
+        maxLat = 42.5;
+        minLng = 20.5;
+        maxLng = 36.5;
+      }
+      const pad = 48;
+      const x = pad + ((lng - minLng) / (maxLng - minLng)) * (width - pad * 2);
+      const y = height - pad - ((lat - minLat) / (maxLat - minLat)) * (height - pad * 2);
+      return { x, y };
+    }
+
+    function renderFallbackCanvas() {
+      const canvas = els.fallbackCanvas;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // 격자선
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+      ctx.lineWidth = 1;
+      for (let gx = 40; gx < w; gx += 60) {
+        ctx.beginPath();
+        ctx.moveTo(gx, 0);
+        ctx.lineTo(gx, h);
+        ctx.stroke();
+      }
+      for (let gy = 40; gy < h; gy += 60) {
+        ctx.beginPath();
+        ctx.moveTo(0, gy);
+        ctx.lineTo(w, gy);
+        ctx.stroke();
+      }
+
+      // 기준 경로
+      for (let i = 0; i < segmentCurves.length; i++) {
+        const isFlight = PILGRIMAGE_STOPS[i].transportToNext === 'intl-flight' || PILGRIMAGE_STOPS[i].transportToNext === 'dom-flight';
+        ctx.save();
+        ctx.beginPath();
+        segmentCurves[i].forEach((pt, idx) => {
+          const p = projectToCanvas(pt[0], pt[1], w, h);
+          if (idx === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        });
+        ctx.strokeStyle = isFlight ? 'rgba(59, 130, 246, 0.3)' : 'rgba(16, 185, 129, 0.3)';
+        ctx.lineWidth = 2.5;
+        if (isFlight) ctx.setLineDash([6, 6]);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 진행된 경로
+      const cur = getPositionAtProgress(state.progress);
+      for (let i = 0; i <= cur.segIndex; i++) {
+        const isFlight = PILGRIMAGE_STOPS[i].transportToNext === 'intl-flight' || PILGRIMAGE_STOPS[i].transportToNext === 'dom-flight';
+        const curve = segmentCurves[i];
+        const limitIdx = i < cur.segIndex
+          ? curve.length - 1
+          : Math.floor(cur.localT * (curve.length - 1));
+
+        ctx.save();
+        ctx.beginPath();
+        for (let k = 0; k <= limitIdx; k++) {
+          const p = projectToCanvas(curve[k][0], curve[k][1], w, h);
+          if (k === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        }
+        ctx.strokeStyle = isFlight ? '#2563eb' : '#059669';
+        ctx.lineWidth = isFlight ? 3.5 : 4.5;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 경유지 점
+      PILGRIMAGE_STOPS.forEach((stop, idx) => {
+        const p = projectToCanvas(stop.lat, stop.lng, w, h);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, idx === state.selectedStopIndex ? 10 : 7, 0, Math.PI * 2);
+        ctx.fillStyle = idx === state.selectedStopIndex ? '#1d4ed8' : '#0f172a';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 11px "Noto Sans KR", sans-serif';
+        ctx.fillText(`${stop.id}.${stop.nameKo}`, p.x + 10, p.y + 4);
+      });
+
+      // 현재 이동 아이콘
+      const vPos = projectToCanvas(cur.lat, cur.lng, w, h);
+      ctx.font = '22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const iconChar = (cur.transport === 'intl-flight' || cur.transport === 'dom-flight') ? '✈️' : '🚌';
+      ctx.fillText(iconChar, vPos.x, vPos.y);
+    }
+
+    // 현재 progress에 맞춰 Leaflet 활성 경로선 및 차량 마커 갱신
+    function renderMapProgress() {
+      if (state.usingFallbackCanvas) {
+        renderFallbackCanvas();
+        return;
+      }
+      if (!state.mapReady || !leafletMap) return;
+
+      activePolylineGroup.clearLayers();
+      const pos = getPositionAtProgress(state.progress);
+
+      for (let i = 0; i <= pos.segIndex; i++) {
+        const transport = PILGRIMAGE_STOPS[i].transportToNext;
+        const isFlight = transport === 'intl-flight' || transport === 'dom-flight';
+        const curve = segmentCurves[i];
+
+        let ptsToDraw;
+        if (i < pos.segIndex) {
+          ptsToDraw = curve;
+        } else {
+          const endIdx = Math.max(1, Math.floor(pos.localT * (curve.length - 1)));
+          ptsToDraw = curve.slice(0, endIdx + 1).concat([[pos.lat, pos.lng]]);
+        }
+
+        L.polyline(ptsToDraw, {
+          color: isFlight ? '#2563eb' : '#059669',
+          weight: isFlight ? 3.5 : 4.5,
+          opacity: 0.92
+        }).addTo(activePolylineGroup);
+      }
+
+      if (movingVehicleMarker) {
+        movingVehicleMarker.setLatLng([pos.lat, pos.lng]);
+        const el = document.getElementById('vehicleMarkerEl');
+        if (el) {
+          const isFlight = pos.transport === 'intl-flight' || pos.transport === 'dom-flight';
+          el.className = `moving-vehicle-icon ${isFlight ? 'flight' : 'bus'}`;
+          el.textContent = isFlight ? '✈️' : '🚌';
+        }
+      }
+    }
+
+    // 선택된 경유지 마커 하이라이트 갱신
+    function updateActiveMarkerBadge(selectedIndex) {
+      stopMarkers.forEach((_, idx) => {
+        const badge = document.getElementById(`badge-${idx}`);
+        if (badge) {
+          if (idx === selectedIndex) {
+            badge.classList.add('active');
+          } else {
+            badge.classList.remove('active');
+          }
+        }
+      });
+    }
+
+    // 보기 모드 ('full' | 'regional') 적용
+    function applyViewModeBounds(animate = true) {
+      if (state.viewMode === 'full') {
+        els.modeFullBtn.className = 'px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all bg-blue-600 text-white shadow-sm cursor-pointer';
+        els.modeRegionalBtn.className = 'px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all text-slate-600 hover:text-slate-900 hover:bg-white/70 cursor-pointer';
+      } else {
+        els.modeRegionalBtn.className = 'px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all bg-emerald-600 text-white shadow-sm cursor-pointer';
+        els.modeFullBtn.className = 'px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all text-slate-600 hover:text-slate-900 hover:bg-white/70 cursor-pointer';
+      }
+
+      if (state.usingFallbackCanvas) {
+        renderFallbackCanvas();
+        return;
+      }
+
+      if (!state.mapReady || !leafletMap) return;
+
+      if (state.viewMode === 'full') {
+        const bounds = L.latLngBounds([
+          [23.5, 20.5],
+          [43.0, 128.5]
+        ]);
+        leafletMap.fitBounds(bounds, { padding: [24, 24], animate });
+      } else {
+        // 아테네(그리스) ~ 이스탄불(터키) 권역 집중
+        const regionalStops = PILGRIMAGE_STOPS.slice(2, 19);
+        const bounds = L.latLngBounds(regionalStops.map(s => [s.lat, s.lng]));
+        leafletMap.fitBounds(bounds, { padding: [32, 32], animate });
+      }
+    }
+
+    /**
+     * =========================================================================
+     * 7. 경유지 선택 및 재생 제어 로직
+     * =========================================================================
+     */
+    function selectStop(index, moveCamera = false) {
+      const clamped = Math.max(0, Math.min(index, PILGRIMAGE_STOPS.length - 1));
+      state.selectedStopIndex = clamped;
+      state.progress = clamped;
+
+      updateInfoCard(clamped);
+      updateStatusHeaderAndScrubber();
+      highlightTimelineItem(clamped);
+      updateActiveMarkerBadge(clamped);
+      renderMapProgress();
+
+      if (moveCamera && !state.usingFallbackCanvas && state.mapReady && leafletMap) {
+        const stop = PILGRIMAGE_STOPS[clamped];
+        const targetZoom = state.viewMode === 'regional'
+          ? Math.max(leafletMap.getZoom(), 7)
+          : Math.max(leafletMap.getZoom(), 5);
+        leafletMap.setView([stop.lat, stop.lng], targetZoom, { animate: true });
+      }
+    }
+
+    function setPlaying(play) {
+      state.isPlaying = play;
+      if (state.isPlaying) {
+        // 끝까지 도달한 상태에서 다시 재생 누르면 처음부터 시작
+        if (state.progress >= PILGRIMAGE_STOPS.length - 1) {
+          state.progress = 0;
+        }
+        state.lastFrameTime = performance.now();
+        els.playPauseIcon.textContent = '⏸';
+        els.playPauseText.textContent = '일시정지';
+        els.playPauseBtn.className = 'px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 active:scale-[0.98] text-white text-xs sm:text-sm font-bold transition cursor-pointer shadow-sm flex items-center gap-1.5';
+        requestAnimationFrame(animationLoop);
+      } else {
+        els.playPauseIcon.textContent = '▶';
+        els.playPauseText.textContent = '재생';
+        els.playPauseBtn.className = 'px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs sm:text-sm font-bold transition cursor-pointer shadow-sm flex items-center gap-1.5';
+      }
+    }
+
+    function animationLoop(now) {
+      if (!state.isPlaying) return;
+
+      if (state.lastFrameTime == null) {
+        state.lastFrameTime = now;
+      }
+      const dtSec = Math.min((now - state.lastFrameTime) / 1000, 0.1);
+      state.lastFrameTime = now;
+
+      // 기본 속도: 1x 기준 초당 약 0.75 구간 이동
+      const baseSegmentsPerSec = 0.75;
+      state.progress += dtSec * baseSegmentsPerSec * state.speed;
+
+      const maxProg = PILGRIMAGE_STOPS.length - 1;
+      if (state.progress >= maxProg) {
+        state.progress = maxProg;
+        state.selectedStopIndex = maxProg;
+        updateInfoCard(maxProg);
+        updateStatusHeaderAndScrubber();
+        highlightTimelineItem(maxProg);
+        updateActiveMarkerBadge(maxProg);
+        renderMapProgress();
+        setPlaying(false);
+        showToast('인천국제공항에 도착하여 사도 바울 성지순례 여정이 완료되었습니다!');
+        return;
+      }
+
+      const currentFloorIdx = Math.floor(state.progress);
+      if (currentFloorIdx !== state.selectedStopIndex) {
+        state.selectedStopIndex = currentFloorIdx;
+        updateInfoCard(currentFloorIdx);
+        highlightTimelineItem(currentFloorIdx);
+        updateActiveMarkerBadge(currentFloorIdx);
+      }
+
+      updateStatusHeaderAndScrubber();
+      renderMapProgress();
+
+      requestAnimationFrame(animationLoop);
+    }
+
+    /**
+     * =========================================================================
+     * 8. 이벤트 리스너 등록 및 초기화
+     * =========================================================================
+     */
+    function bindEvents() {
+      els.playPauseBtn.addEventListener('click', () => {
+        setPlaying(!state.isPlaying);
+      });
+
+      els.prevStopBtn.addEventListener('click', () => {
+        setPlaying(false);
+        const prevIdx = Math.max(0, Math.ceil(state.progress) - 1);
+        selectStop(prevIdx === state.selectedStopIndex ? Math.max(0, prevIdx - 1) : prevIdx, true);
+      });
+
+      els.nextStopBtn.addEventListener('click', () => {
+        setPlaying(false);
+        const nextIdx = Math.min(PILGRIMAGE_STOPS.length - 1, Math.floor(state.progress) + 1);
+        selectStop(nextIdx, true);
+      });
+
+      els.restartBtn.addEventListener('click', () => {
+        setPlaying(false);
+        selectStop(0, false);
+        applyViewModeBounds(true);
+        showToast('여정을 처음(인천국제공항)으로 되돌렸습니다.');
+      });
+
+      els.scrubber.addEventListener('input', (e) => {
+        setPlaying(false);
+        const ratio = Number(e.target.value) / 1000;
+        const maxProg = PILGRIMAGE_STOPS.length - 1;
+        state.progress = ratio * maxProg;
+        const nearestIdx = Math.min(Math.round(state.progress), maxProg);
+        state.selectedStopIndex = nearestIdx;
+
+        updateInfoCard(nearestIdx);
+        updateStatusHeaderAndScrubber();
+        highlightTimelineItem(nearestIdx);
+        updateActiveMarkerBadge(nearestIdx);
+        renderMapProgress();
+      });
+
+      els.speedBtns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const spd = Number(btn.dataset.speed);
+          state.speed = spd;
+          els.speedBtns.forEach((b) => {
+            if (Number(b.dataset.speed) === spd) {
+              b.className = 'speed-btn px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-900 text-white cursor-pointer';
+            } else {
+              b.className = 'speed-btn px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer';
+            }
+          });
+          showToast(`재생 속도가 ${spd}x로 설정되었습니다.`);
+        });
+      });
+
+      els.modeFullBtn.addEventListener('click', () => {
+        state.viewMode = 'full';
+        applyViewModeBounds(true);
+        showToast('전체 여정(인천~도하~그리스/터키~인천) 보기로 전환했습니다.');
+      });
+
+      els.modeRegionalBtn.addEventListener('click', () => {
+        state.viewMode = 'regional';
+        applyViewModeBounds(true);
+        showToast('그리스·터키 집중(아테네~이스탄불) 보기로 전환했습니다.');
+      });
+
+      els.focusStopBtn.addEventListener('click', () => {
+        const stop = PILGRIMAGE_STOPS[state.selectedStopIndex];
+        if (!state.usingFallbackCanvas && state.mapReady && leafletMap) {
+          leafletMap.setView([stop.lat, stop.lng], 8, { animate: true });
+          showToast(`${stop.nameKo} 위치로 지도를 확대했습니다.`);
+        } else {
+          renderFallbackCanvas();
+        }
+      });
+
+      window.addEventListener('resize', () => {
+        if (state.usingFallbackCanvas) {
+          resizeFallbackCanvas();
+          renderFallbackCanvas();
+        } else if (leafletMap) {
+          leafletMap.invalidateSize();
+        }
+      });
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      precomputeAllCurves();
+      renderTimelineList();
+      updateInfoCard(0);
+      updateStatusHeaderAndScrubber();
+      highlightTimelineItem(0);
+      bindEvents();
+      initMap();
+    });
+  </script>
+</body>
+</html>
